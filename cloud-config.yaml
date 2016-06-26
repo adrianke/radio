@@ -1,0 +1,272 @@
+#cloud-config
+users:
+  - name: radio
+    groups: sudo
+    shell: /bin/bash
+    sudo: ['ALL=(ALL) NOPASSWD:ALL']
+    ssh-authorized-keys:
+      - [PUBLIC SSH KEY]
+package_upgrade: false
+packages:
+  - openssl
+  - ca-certificates
+  - iptables
+  - openvpn
+  - icecast2
+  - mpd
+  - libmad0
+  - libid3tag0
+  - mpc
+  - nodejs
+  - npm
+write_files:
+  - path: /etc/mpd.conf
+    content: |
+      music_directory		"/home/radio/music"
+      playlist_directory		"/home/radio/.mpd/playlists"
+      db_file			"/home/radio/.mpd/database"
+      pid_file			"/home/radio/.mpd/pid"
+      state_file			"/home/radio/.mpd/state"
+      user				"radio"
+      group				"radio"
+      bind_to_address		"127.0.0.1"
+      port				"6600"
+      gapless_mp3_playback			"yes"
+      restore_paused "no"
+      save_absolute_paths_in_playlists	"yes"
+      #metadata_to_use	"artist,album,title,track,name,genre,date,composer,performer,disc"
+      auto_update	"yes"
+      auto_update_depth "3"
+      follow_outside_symlinks	"yes"
+      follow_inside_symlinks		"yes"
+      zeroconf_enabled		"no"
+      password                        "hackme@read,add,control,admin"
+      default_permissions             "read"
+      volume_normalization		"yes"
+      filesystem_charset		"UTF-8"
+      
+      audio_output {
+      	type		"shout"
+      	encoding	"mp3"
+      	name		"Always music"
+      	host		"localhost"
+      	port		"8000"
+      	mount		"/stream"
+      	password	"hackme"
+      	bitrate		"320"
+      	format		"44100:16:1"
+      	protocol	"icecast2"
+      	user		"source"
+      	mixer_type      "software"
+      }
+  - path: /etc/openvpn/server.conf
+    content: |
+      port 1194
+      proto udp
+      dev tun
+      sndbuf 0
+      rcvbuf 0
+      ca ca.crt
+      cert server.crt
+      key server.key
+      dh dh.pem
+      tls-auth ta.key 0
+      topology subnet
+      server 10.8.0.0 255.255.255.0
+      ifconfig-pool-persist ipp.txt
+      push "redirect-gateway def1 bypass-dhcp"
+      push "dhcp-option DNS 8.8.8.8"
+      push "dhcp-option DNS 8.8.4.4"
+      keepalive 10 120
+      cipher AES-128-CBC
+      comp-lzo
+      user nobody
+      group nogroup
+      persist-key
+      persist-tun
+      status openvpn-status.log
+      verb 3
+      crl-verify crl.pem
+  - path: /etc/openvpn/common_client.txt
+    content: |
+      client
+      dev tun
+      proto udp
+      sndbuf 0
+      rcvbuf 0
+      resolv-retry infinite
+      nobind
+      persist-key
+      persist-tun
+      remote-cert-tls server
+      cipher AES-128-CBC
+      comp-lzo
+      setenv opt block-outside-dns
+      key-direction 1
+      verb 3
+  - path: /root/openvpn.sh
+    content: |
+      wget -O ~/EasyRSA-3.0.1.tgz https://github.com/OpenVPN/easy-rsa/releases/download/3.0.1/EasyRSA-3.0.1.tgz
+      tar xzf ~/EasyRSA-3.0.1.tgz -C ~/
+      mv ~/EasyRSA-3.0.1/ /etc/openvpn/
+      mv /etc/openvpn/EasyRSA-3.0.1/ /etc/openvpn/easy-rsa/
+      chown -R root:root /etc/openvpn/easy-rsa/
+      rm -rf ~/EasyRSA-3.0.1.tgz
+      cd /etc/openvpn/easy-rsa/
+      ./easyrsa init-pki
+      ./easyrsa --batch build-ca nopass
+      ./easyrsa gen-dh
+      ./easyrsa build-server-full server nopass
+      ./easyrsa build-client-full radio1 nopass
+      ./easyrsa gen-crl
+      cp pki/ca.crt pki/private/ca.key pki/dh.pem pki/issued/server.crt pki/private/server.key /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
+      chown nobody:nogroup /etc/openvpn/crl.pem
+      openvpn --genkey --secret /etc/openvpn/ta.key
+      sed -i 's|#net.ipv4.ip_forward=1|net.ipv4.ip_forward=1|' /etc/sysctl.conf
+      echo 1 > /proc/sys/net/ipv4/ip_forward
+      iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $(wget -qO- ipv4.icanhazip.com)
+      sed -i "1 a\iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j SNAT --to $(wget -qO- ipv4.icanhazip.com)" /etc/rc.local
+      iptables -I INPUT -p udp --dport 1194 -j ACCEPT
+      iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT
+      iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+      sed -i "1 a\iptables -I INPUT -p udp --dport 1194 -j ACCEPT" /etc/rc.local
+      sed -i "1 a\iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT" /etc/rc.local
+      sed -i "1 a\iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT" /etc/rc.local
+      /etc/init.d/openvpn restart
+      cp /etc/openvpn/common_client.txt /home/radio/radio1.ovpn
+      echo "<ca>" >>  /home/radio/radio1.ovpn
+      cat /etc/openvpn/easy-rsa/pki/ca.crt >> /home/radio/radio1.ovpn
+      echo "</ca>" >> /home/radio/radio1.ovpn
+      echo "<cert>" >> /home/radio/radio1.ovpn
+      cat /etc/openvpn/easy-rsa/pki/issued/radio1.crt >> /home/radio/radio1.ovpn
+      echo "</cert>" >> /home/radio/radio1.ovpn
+      echo "<key>" >> /home/radio/radio1.ovpn
+      cat /etc/openvpn/easy-rsa/pki/private/radio1.key >> /home/radio/radio1.ovpn
+      echo "</key>" >> /home/radio/radio1.ovpn
+      echo "<tls-auth>" >> /home/radio/radio1.ovpn
+      cat /etc/openvpn/ta.key >> /home/radio/radio1.ovpn
+      echo "</tls-auth>" >> /home/radio/radio1.ovpn
+      echo remote $(wget -qO- ipv4.icanhazip.com) 1194 >> /home/radio/radio1.ovpn
+      echo "Ready for reboot" | wall
+  - path: /home/radio/changer/srv.js
+    content: |
+      var fs = require('fs');
+      var child_process = require('child_process');
+      var Tail = require('tail').Tail;
+      
+      tail = new Tail('/var/log/icecast2/error.log');
+      
+      tail.on('line', function (data) {
+        if (data.indexOf('connection/_handle_source_request') !== -1 && data.indexOf('/talk') !== -1) {
+          change('talk');
+        } else if (data.indexOf('source/source_shutdown') !== -1 && data.indexOf('/talk') !== -1) {
+          change('music');
+        }
+      });
+      
+      function change(playlist) {
+        if (playlist == "music") {
+          child_process.spawn('/home/radio/music.sh', [], {detached: true});
+        } else if (playlist == "talk") {
+          child_process.spawn('/home/radio/talk.sh', [], {detached: true});
+        }
+      }
+      
+      change('music');
+  - path: /home/radio/new_music.sh
+    content: |
+      #/bin/bash
+      ls -w 1 /home/radio/music/*.mp3 > /home/radio/.mpd/playlists/music.m3u
+  - path: /home/radio/.mpd/playlists/talk.m3u
+    content: |
+      http://127.0.0.1:8000/talk
+  - path: /home/radio/music.sh
+    content: |
+      #/bin/bash
+      /usr/bin/mpc --host hackme@localhost clear
+      /usr/bin/mpc --host hackme@localhost load music
+      /usr/bin/mpc --host hackme@localhost play
+      /usr/bin/mpc --host hackme@localhost repeat on
+      /usr/bin/mpc --host hackme@localhost random on
+  - path: /home/radio/talk.sh
+    content: |
+      #/bin/bash
+      /usr/bin/mpc --host hackme@localhost clear
+      /usr/bin/mpc --host hackme@localhost load talk
+      /usr/bin/mpc --host hackme@localhost play
+      /usr/bin/mpc --host hackme@localhost repeat on
+      /usr/bin/mpc --host hackme@localhost random on
+  - path: /root/icecast.xml
+    content: |
+      <icecast>
+          <limits>
+              <sources>5</sources>
+          </limits>
+          <authentication>
+              <source-password>hackme</source-password>
+              <relay-password>hackme</relay-password>
+              <admin-user>admin</admin-user>
+              <admin-password>hackme</admin-password>
+          </authentication>
+          <!--<directory>
+              <yp-url-timeout>15</yp-url-timeout>
+              <yp-url>http://dir.xiph.org/cgi-bin/yp-cgi</yp-url>
+          </directory>-->
+          <mount type="normal">
+            <mount-name>/stream</mount-name>
+            <fallback-mount>/silence.mp3</fallback-mount>
+            <fallback-override>1</fallback-override>
+            <stream-name>Test</stream-name>
+            <stream-description>My audio description</stream-description>
+          </mount>
+          <mount type="normal">
+            <mount-name>/talk</mount-name>
+            <stream-name>Talk</stream-name>
+            <stream-description>My audio description</stream-description>
+          </mount>
+          <hostname>localhost</hostname>
+          <listen-socket>
+              <port>8000</port>
+          </listen-socket>
+          <fileserve>1</fileserve>
+          <paths>
+              <logdir>/var/log/icecast2</logdir>
+              <webroot>/usr/share/icecast2/web</webroot>
+              <adminroot>/usr/share/icecast2/admin</adminroot>
+              <alias source="/" destination="/status.xsl"/>
+          </paths>
+          <logging>
+              <accesslog>access.log</accesslog>
+              <errorlog>error.log</errorlog>
+              <loglevel>3</loglevel> <!-- 4 Debug, 3 Info, 2 Warn, 1 Error -->
+          </logging>
+          <http-headers>
+              <header name="Access-Control-Allow-Origin" value="*" />
+          </http-headers>
+      </icecast>
+runcmd:
+  - openssl rand -hex 32 > /home/radio/icecast_password.txt
+  - mkdir -p /home/radio/music
+  - apt-get install # mpd config fix
+  - mkdir -p /home/radio/.mpd/playlists
+  - ln -s /usr/bin/nodejs /usr/bin/node
+  - npm install --prefix /home/radio/changer/ tail
+  - npm install pm2 -g
+  - (crontab -u radio -l; echo "@reboot /usr/local/bin/pm2 start /home/radio/changer/srv.js" ) | crontab -u radio -
+  - chmod -R 755 /home
+  - chmod -R 777 /home/radio/*
+  - chmod -R 700 /home/radio/.ssh
+  - chmod -R 777 /home/radio/.mpd
+  - mkdir -p /var/log/iceast2/
+  - chmod -R 777 /var/log/iceast2/
+  - mkdir -p /home/radio/.pm2
+  - chmod -R 777 /home/radio/.pm2
+  - wget http://www.xamuel.com/blank-mp3-files/point1sec.mp3 -O /usr/share/icecast2/web/silence.mp3
+  - mv /root/icecast.xml /etc/icecast2/icecast.xml
+  - sed -i "s/hackme/`cat /home/radio/icecast_password.txt`/g" /etc/icecast2/icecast.xml
+  - sed -i "s/hackme/`cat /home/radio/icecast_password.txt`/g" /etc/mpd.conf
+  - sed -i "s/hackme/`cat /home/radio/icecast_password.txt`/g" /home/radio/*.sh
+  - sed -i "s/ENABLE=false/ENABLE=true/g" /etc/default/icecast2
+  - mpc --host `cat /home/radio/icecast_password.txt`@localhost update
+  - chmod +x /root/openvpn.sh
+  - bash /root/openvpn.sh
