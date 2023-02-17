@@ -261,7 +261,7 @@ runcmd:
   - chmod -R 777 /var/log/iceast2/
   - mkdir -p /home/radio/.pm2
   - chmod -R 777 /home/radio/.pm2
-  - wget http://www.xamuel.com/blank-mp3-files/point1sec.mp3 -O /usr/share/icecast2/web/silence.mp3
+  - wget https://github.com/StreetVoice/HysteriaPlayer/raw/master/HysteriaPlayer/point1sec.mp3 -O /usr/share/icecast2/web/silence.mp3
   - mv /root/icecast.xml /etc/icecast2/icecast.xml
   - sed -i "s/hackme/`cat /home/radio/icecast_password.txt`/g" /etc/icecast2/icecast.xml
   - sed -i "s/hackme/`cat /home/radio/icecast_password.txt`/g" /etc/mpd.conf
