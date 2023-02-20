@@ -10,7 +10,7 @@ A cloud config file tested on DigitalOcean to set up an icecast2 streaming serve
  * Create a new DigitalOcean dropplet with Ubuntu 14.04.
  * Select the `User Data` option and paste in the contents of `cloud-config.yaml`
   * You should update the script as needed. Note the icecast2 settings.
-  * **ALWYAS CHANGE THE SSH KEY IN `cloud-config.yaml`**
+  * **ALWAYS CHANGE THE SSH KEY IN `cloud-config.yaml`**
  * Add optional SSH keys on the DigitalOcean website
  * Immediately connect to the server over ssh
   * Username: radio
